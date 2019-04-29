@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// package logs are convenience methods for fetching logs from a minikube cluster
+// Package logs are convenience methods for fetching logs from a minikube cluster
 package logs
 
 import (
@@ -33,13 +33,20 @@ import (
 )
 
 // rootCauseRe is a regular expression that matches known failure root causes
-var rootCauseRe = regexp.MustCompile(`^error: |eviction manager: pods.* evicted|unknown flag: --`)
+var rootCauseRe = regexp.MustCompile(`^error: |eviction manager: pods.* evicted|unknown flag: --|forbidden.*no providers available|eviction manager:.*evicted`)
+
+// ignoreRe is a regular expression that matches spurious errors to not surface
+var ignoreCauseRe = regexp.MustCompile("error: no objects passed to apply")
 
 // importantPods are a list of pods to retrieve logs for, in addition to the bootstrapper logs.
 var importantPods = []string{
-	"k8s_kube-apiserver",
-	"k8s_coredns_coredns",
-	"k8s_kube-scheduler",
+	"kube-apiserver",
+	"coredns",
+	"kube-scheduler",
+	"kube-proxy",
+	"kube-addon-manager",
+	"kubernetes-dashboard",
+	"storage-provisioner",
 }
 
 // lookbackwardsCount is how far back to look in a log for problems. This should be large enough to
@@ -58,7 +65,7 @@ func Follow(r cruntime.Manager, bs bootstrapper.Bootstrapper, runner bootstrappe
 
 // IsProblem returns whether this line matches a known problem
 func IsProblem(line string) bool {
-	return rootCauseRe.MatchString(line)
+	return rootCauseRe.MatchString(line) && !ignoreCauseRe.MatchString(line)
 }
 
 // FindProblems finds possible root causes among the logs
@@ -105,6 +112,10 @@ func OutputProblems(problems map[string][]string, maxLines int) {
 // Output displays logs from multiple sources in tail(1) format
 func Output(r cruntime.Manager, bs bootstrapper.Bootstrapper, runner bootstrapper.CommandRunner, lines int) error {
 	cmds := logCommands(r, bs, lines, false)
+
+	// These are not technically logs, but are useful to have in bug reports.
+	cmds["kernel"] = "uptime && uname -a"
+
 	names := []string{}
 	for k := range cmds {
 		names = append(names, k)
@@ -112,7 +123,10 @@ func Output(r cruntime.Manager, bs bootstrapper.Bootstrapper, runner bootstrappe
 	sort.Strings(names)
 
 	failed := []string{}
-	for _, name := range names {
+	for i, name := range names {
+		if i > 0 {
+			console.OutLn("")
+		}
 		console.OutLn("==> %s <==", name)
 		var b bytes.Buffer
 		err := runner.CombinedOutputTo(cmds[name], &b)
@@ -143,7 +157,7 @@ func logCommands(r cruntime.Manager, bs bootstrapper.Bootstrapper, length int, f
 		}
 		glog.Infof("%d containers: %s", len(ids), ids)
 		if len(ids) == 0 {
-			cmds[pod] = fmt.Sprintf("No container was found matching %q", pod)
+			glog.Warningf("No container was found matching %q", pod)
 			continue
 		}
 		cmds[pod] = r.ContainerLogCmd(ids[0], length, follow)

@@ -14,21 +14,47 @@ the host PATH:
 * [HyperV](#hyperv-driver)
 * [VMware](#vmware-unified-driver)
 
-#### KVM2 driver
+## KVM2 driver
 
 To install the KVM2 driver, first install and configure the prereqs:
 
-* Debian or Ubuntu 18.x: `sudo apt install libvirt-clients libvirt-daemon-system qemu-kvm`
-* Ubuntu 16.x or older: `sudo apt install libvirt-bin libvirt-daemon-system qemu-kvm`
-* Fedora/CentOS/RHEL: `sudo yum install libvirt-daemon-kvm qemu-kvm`
+* Debian or Ubuntu 18.x:
 
-Then you will need to add yourself to libvirt group (older distributions may use libvirtd instead)
+```shell
+sudo apt install libvirt-clients libvirt-daemon-system qemu-kvm
+```
 
-`sudo usermod -a -G libvirt $(whoami)`
+* Ubuntu 16.x or older:
+
+```shell
+sudo apt install libvirt-bin libvirt-daemon-system qemu-kvm
+```
+
+* Fedora/CentOS/RHEL:
+
+```shell
+sudo yum install libvirt-daemon-kvm qemu-kvm
+```
+
+Enable,start, and verify the `libvirtd` service has started.
+
+```shell
+sudo systemctl enable libvirtd.service
+sudo systemctl start libvirtd.service
+sudo systemctl status libvirtd.service
+```
+
+Then you will need to add yourself to `libvirt` group (older distributions may use `libvirtd` instead)
+
+```shell
+sudo usermod -a -G libvirt $(whoami)
+```
 
 Then to join the group with your current user session:
 
-`newgrp libvirt`
+```shell
+newgrp libvirt
+```
 
 Now install the driver:
 
@@ -37,13 +63,13 @@ curl -LO https://storage.googleapis.com/minikube/releases/latest/docker-machine-
   && sudo install docker-machine-driver-kvm2 /usr/local/bin/
 ```
 
-NOTE: Ubuntu users on a release older than 18.04, or anyone experiencing [#3206: Error creating new host: dial tcp: missing address.](https://github.com/kubernetes/minikube/issues/3206) you will need to build your own driver until [#3689](https://github.com/kubernetes/minikube/issues/3689) is resolved. Building this binary will require [Go v1.11](https://golang.org/dl/) or newer to be installed. 
+NOTE: Ubuntu users on a release older than 18.04, or anyone experiencing [#3206: Error creating new host: dial tcp: missing address.](https://github.com/kubernetes/minikube/issues/3206) you will need to build your own driver until [#3689](https://github.com/kubernetes/minikube/issues/3689) is resolved. Building this binary will require [Go v1.11](https://golang.org/dl/) or newer to be installed.
 
-```
+```shell
 sudo apt install libvirt-dev
-test -d $HOME/go/src/k8s.io/minikube || \
-  git clone https://github.com/kubernetes/minikube.git $HOME/go/src/k8s.io/minikube
-cd $HOME/go/src/k8s.io/minikube
+test -d $GOPATH/src/k8s.io/minikube || \
+  git clone https://github.com/kubernetes/minikube.git $GOPATH/src/k8s.io/minikube
+cd $GOPATH/src/k8s.io/minikube
 git pull
 make out/docker-machine-driver-kvm2
 sudo install out/docker-machine-driver-kvm2 /usr/local/bin
@@ -55,32 +81,32 @@ To use the kvm2 driver:
 minikube start --vm-driver kvm2
 ```
 
-#### Hyperkit driver
-
-The Hyperkit driver will eventually replace the existing xhyve driver.
-It is built from the minikube source tree, and uses [moby/hyperkit](http://github.com/moby/hyperkit) as a Go library.
-
-To install the hyperkit driver via brew:
-
+or, to use kvm2 as a default driver:
 
 ```shell
-brew install docker-machine-driver-hyperkit
-
-# docker-machine-driver-hyperkit need root owner and uid 
-sudo chown root:wheel /usr/local/opt/docker-machine-driver-hyperkit/bin/docker-machine-driver-hyperkit
-sudo chmod u+s /usr/local/opt/docker-machine-driver-hyperkit/bin/docker-machine-driver-hyperkit
+minikube config set vm-driver kvm2
 ```
 
-To install the hyperkit driver manually:
+and run minikube as usual:
+
+```shell
+minikube start
+```
+
+## Hyperkit driver
+
+Install the [hyperkit](http://github.com/moby/hyperkit) VM manager using [brew](https://brew.sh):
+
+```shell
+brew install hyperkit
+```
+
+Then install the most recent version of minikube's fork of the hyperkit driver:
 
 ```shell
 curl -LO https://storage.googleapis.com/minikube/releases/latest/docker-machine-driver-hyperkit \
 && sudo install -o root -g wheel -m 4755 docker-machine-driver-hyperkit /usr/local/bin/
 ```
-
-The hyperkit driver currently requires running as root to use the vmnet framework to setup networking.
-
-If you encountered errors like `Could not find hyperkit executable`, you might need to install [Docker for Mac](https://store.docker.com/editions/community/docker-ce-desktop-mac)
 
 If you are using [dnsmasq](http://www.thekelleys.org.uk/dnsmasq/doc.html) in your setup and cluster creation fails (stuck at kube-dns initialization) you might need to add `listen-address=192.168.64.1` to `dnsmasq.conf`.
 
@@ -92,7 +118,13 @@ To use the driver:
 minikube start --vm-driver hyperkit
 ```
 
-#### HyperV driver
+or, to use hyperkit as a default driver for minikube:
+
+```shell
+minikube config set vm-driver hyperkit
+```
+
+## HyperV driver
 
 Hyper-v users may need to create a new external network switch as described [here](https://docs.docker.com/machine/drivers/hyper-v/). This step may prevent a problem in which `minikube start` hangs indefinitely, unable to ssh into the minikube virtual machine. In this add, add the `--hyperv-virtual-switch=switch-name` argument to the `minikube start` command.
 
@@ -104,12 +136,24 @@ To use the driver:
 minikube start --vm-driver hyperv --hyperv-virtual-switch=switch-name
 ```
 
-#### VMware unified driver
+or, to use hyperv as a default driver:
+
+```shell
+minikube config set vm-driver hyperv && minikube config set hyperv-virtual-switch switch-name
+```
+
+and run minikube as usual:
+
+```shell
+minikube start
+```
+
+## VMware unified driver
 
 The VMware unified driver will eventually replace the existing vmwarefusion driver.
 The new unified driver supports both VMware Fusion (on macOS) and VMware Workstation (on Linux and Windows)
 
-To install the vmware unified driver, head over at https://github.com/machine-drivers/docker-machine-driver-vmware/releases and download the release for your operating system. 
+To install the vmware unified driver, head over at <https://github.com/machine-drivers/docker-machine-driver-vmware/releases> and download the release for your operating system.
 
 The driver must be:
 
@@ -130,4 +174,16 @@ To use the driver:
 
 ```shell
 minikube start --vm-driver vmware
+```
+
+or, to use vmware unified driver as a default driver:
+
+```shell
+minikube config set vm-driver vmware
+```
+
+and run minikube as usual:
+
+```shell
+minikube start
 ```

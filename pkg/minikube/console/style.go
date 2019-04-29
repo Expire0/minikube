@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"golang.org/x/text/message"
+	"golang.org/x/text/number"
 )
 
 var (
@@ -41,29 +42,35 @@ type style struct {
 // styles is a map of style name to style struct
 // For consistency, ensure that emojis added render with the same width across platforms.
 var styles = map[string]style{
-	"happy":        {Prefix: "😄  ", LowPrefix: "o   "},
-	"success":      {Prefix: "✅  "},
-	"failure":      {Prefix: "❌  ", LowPrefix: "X   "},
-	"conflict":     {Prefix: "💥  ", LowPrefix: "x   "},
-	"fatal":        {Prefix: "💣  ", LowPrefix: "!   "},
-	"notice":       {Prefix: "📌  ", LowPrefix: "*   "},
-	"ready":        {Prefix: "🏄  ", LowPrefix: "=   "},
-	"running":      {Prefix: "🏃  ", LowPrefix: ":   "},
-	"provisioning": {Prefix: "🌱  ", LowPrefix: ">   "},
-	"restarting":   {Prefix: "🔄  ", LowPrefix: ":   "},
-	"stopping":     {Prefix: "✋  ", LowPrefix: ":   "},
-	"stopped":      {Prefix: "🛑  "},
-	"warning":      {Prefix: "⚠️  ", LowPrefix: "!   "},
-	"waiting":      {Prefix: "⌛  ", LowPrefix: ":   "},
-	"usage":        {Prefix: "💡  "},
-	"launch":       {Prefix: "🚀  "},
-	"sad":          {Prefix: "😿  ", LowPrefix: "*   "},
-	"thumbs-up":    {Prefix: "👍  "},
-	"option":       {Prefix: "    ▪ "}, // Indented bullet
-	"command":      {Prefix: "    ▪ "}, // Indented bullet
-	"log-entry":    {Prefix: "    "},   // Indent
-	"crushed":      {Prefix: "💔  "},
-	"url":          {Prefix: "👉  "},
+	"happy":         {Prefix: "😄  ", LowPrefix: "o   "},
+	"success":       {Prefix: "✅  "},
+	"failure":       {Prefix: "❌  ", LowPrefix: "X   "},
+	"conflict":      {Prefix: "💥  ", LowPrefix: "x   "},
+	"fatal":         {Prefix: "💣  ", LowPrefix: "!   "},
+	"notice":        {Prefix: "📌  ", LowPrefix: "*   "},
+	"ready":         {Prefix: "🏄  ", LowPrefix: "=   "},
+	"running":       {Prefix: "🏃  ", LowPrefix: ":   "},
+	"provisioning":  {Prefix: "🌱  ", LowPrefix: ">   "},
+	"restarting":    {Prefix: "🔄  ", LowPrefix: ":   "},
+	"reconfiguring": {Prefix: "📯  ", LowPrefix: ":   "},
+	"stopping":      {Prefix: "✋  ", LowPrefix: ":   "},
+	"stopped":       {Prefix: "🛑  "},
+	"warning":       {Prefix: "⚠️  ", LowPrefix: "!   "},
+	"waiting":       {Prefix: "⌛  ", LowPrefix: ":   "},
+	"waiting-pods":  {Prefix: "⌛  ", LowPrefix: ":   ", OmitNewline: true},
+	"usage":         {Prefix: "💡  "},
+	"launch":        {Prefix: "🚀  "},
+	"sad":           {Prefix: "😿  ", LowPrefix: "*   "},
+	"thumbs-up":     {Prefix: "👍  "},
+	"option":        {Prefix: "    ▪ "}, // Indented bullet
+	"command":       {Prefix: "    ▪ "}, // Indented bullet
+	"log-entry":     {Prefix: "    "},   // Indent
+	"crushed":       {Prefix: "💔  "},
+	"url":           {Prefix: "👉  "},
+	"documentation": {Prefix: "📘  "},
+	"issues":        {Prefix: "⁉️   "},
+	"issue":         {Prefix: "    ▪ "}, // Indented bullet
+	"check":         {Prefix: "✔️  "},
 
 	// Specialized purpose styles
 	"iso-download":      {Prefix: "💿  ", LowPrefix: "@   "},
@@ -80,7 +87,6 @@ var styles = map[string]style{
 	"celebrate":         {Prefix: "🎉  "},
 	"container-runtime": {Prefix: "🎁  "},
 	"Docker":            {Prefix: "🐳  "},
-	"rkt":               {Prefix: "🚀  "},
 	"CRI-O":             {Prefix: "🎁  "}, // This should be a snow-flake, but the emoji has a strange width on macOS
 	"containerd":        {Prefix: "📦  "},
 	"permissions":       {Prefix: "🔑  "},
@@ -91,8 +97,11 @@ var styles = map[string]style{
 	"verifying-noline":  {Prefix: "🤔  ", OmitNewline: true},
 	"kubectl":           {Prefix: "💗  ", LowPrefix: "+   "},
 	"meh":               {Prefix: "🙄  ", LowPrefix: "?   "},
-	"embarassed":        {Prefix: "🤦  ", LowPrefix: "*   "},
+	"embarrassed":       {Prefix: "🤦  ", LowPrefix: "*   "},
 	"tip":               {Prefix: "💡  ", LowPrefix: "i   "},
+	"unmount":           {Prefix: "🔥  ", LowPrefix: "x   "},
+	"mount-options":     {Prefix: "💾  ", LowPrefix: "o   "},
+	"fileserver":        {Prefix: "🚀  ", LowPrefix: "@   ", OmitNewline: true},
 }
 
 // Add a prefix to a string
@@ -123,6 +132,11 @@ func lowPrefix(s style) string {
 // Apply styling to a format string
 func applyStyle(style string, useColor bool, format string, a ...interface{}) (string, error) {
 	p := message.NewPrinter(preferredLanguage)
+	for i, x := range a {
+		if _, ok := x.(int); ok {
+			a[i] = number.Decimal(x, number.NoSeparator())
+		}
+	}
 	out := p.Sprintf(format, a...)
 
 	s, ok := styles[style]

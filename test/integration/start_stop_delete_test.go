@@ -19,59 +19,78 @@ limitations under the License.
 package integration
 
 import (
+	"fmt"
 	"net"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/docker/machine/libmachine/state"
+	"k8s.io/minikube/pkg/minikube/constants"
 	"k8s.io/minikube/test/integration/util"
 )
 
 func TestStartStop(t *testing.T) {
 	tests := []struct {
-		runtime string
+		name string
+		args []string
 	}{
-		{runtime: "docker"},
-		{runtime: "containerd"},
-		{runtime: "crio"},
+		{"nocache_oldest", []string{
+			"--cache-images=false",
+			fmt.Sprintf("--kubernetes-version=%s", constants.OldestKubernetesVersion),
+		}},
+		{"feature_gates_newest_cni", []string{
+			"--feature-gates",
+			"ServerSideApply=true",
+			"--network-plugin=cni",
+			"--extra-config=kubelet.network-plugin=cni",
+			fmt.Sprintf("--kubernetes-version=%s", constants.NewestKubernetesVersion),
+		}},
+		{"containerd_and_non_default_apiserver_port", []string{
+			"--container-runtime=containerd",
+			"--docker-opt containerd=/var/run/containerd/containerd.sock",
+			"--apiserver-port=8444",
+		}},
+		{"crio_ignore_preflights", []string{
+			"--container-runtime=crio",
+			"--extra-config",
+			"kubeadm.ignore-preflight-errors=SystemVerification",
+		}},
 	}
 
 	for _, test := range tests {
-		t.Run(test.runtime, func(t *testing.T) {
-			runner := NewMinikubeRunner(t)
-			if test.runtime != "docker" && usingNoneDriver(runner) {
-				t.Skipf("skipping, can't use %s with none driver", test.runtime)
+		t.Run(test.name, func(t *testing.T) {
+			r := NewMinikubeRunner(t)
+			if !strings.Contains(test.name, "docker") && usingNoneDriver(r) {
+				t.Skipf("skipping %s - incompatible with none driver", test.name)
 			}
 
-			runner.RunCommand("config set WantReportErrorPrompt false", true)
-			runner.RunCommand("delete", false)
-			runner.CheckStatus(state.None.String())
+			r.RunCommand("config set WantReportErrorPrompt false", true)
+			r.RunCommand("delete", false)
+			r.CheckStatus(state.None.String())
+			r.Start(test.args...)
+			r.CheckStatus(state.Running.String())
 
-			runner.SetRuntime(test.runtime)
-			runner.Start()
-			runner.CheckStatus(state.Running.String())
-
-			ip := runner.RunCommand("ip", true)
+			ip := r.RunCommand("ip", true)
 			ip = strings.TrimRight(ip, "\n")
 			if net.ParseIP(ip) == nil {
 				t.Fatalf("IP command returned an invalid address: %s", ip)
 			}
 
 			checkStop := func() error {
-				runner.RunCommand("stop", true)
-				return runner.CheckStatusNoFail(state.Stopped.String())
+				r.RunCommand("stop", true)
+				return r.CheckStatusNoFail(state.Stopped.String())
 			}
 
 			if err := util.Retry(t, checkStop, 5*time.Second, 6); err != nil {
 				t.Fatalf("timed out while checking stopped status: %v", err)
 			}
 
-			runner.Start()
-			runner.CheckStatus(state.Running.String())
+			r.Start(test.args...)
+			r.CheckStatus(state.Running.String())
 
-			runner.RunCommand("delete", true)
-			runner.CheckStatus(state.None.String())
+			r.RunCommand("delete", true)
+			r.CheckStatus(state.None.String())
 		})
 	}
 }

@@ -35,6 +35,17 @@ func (r *Docker) Name() string {
 	return "Docker"
 }
 
+// Version retrieves the current version of this runtime
+func (r *Docker) Version() (string, error) {
+	// Note: the server daemon has to be running, for this call to return successfully
+	ver, err := r.Runner.CombinedOutput("docker version --format '{{.Server.Version}}'")
+	if err != nil {
+		return "", err
+	}
+
+	return strings.Split(ver, "\n")[0], nil
+}
+
 // SocketPath returns the path to the socket file for Docker
 func (r *Docker) SocketPath() string {
 	return r.Socket
@@ -62,7 +73,7 @@ func (r *Docker) Enable() error {
 	if err := disableOthers(r, r.Runner); err != nil {
 		glog.Warningf("disableOthers: %v", err)
 	}
-	return r.Runner.Run("sudo systemctl restart docker")
+	return r.Runner.Run("sudo systemctl start docker")
 }
 
 // Disable idempotently disables Docker on a host
