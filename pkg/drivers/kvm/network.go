@@ -1,3 +1,5 @@
+// +build linux
+
 /*
 Copyright 2016 The Kubernetes Authors All rights reserved.
 
@@ -87,10 +89,9 @@ func (d *Driver) ensureNetwork() error {
 
 	// network: default
 
-	// Start the default network
 	// It is assumed that the libvirt/kvm installation has already created this network
-	log.Infof("Ensuring network %s is active", defaultNetworkName)
-	if err := setupNetwork(conn, defaultNetworkName); err != nil {
+	log.Infof("Ensuring network %s is active", d.Network)
+	if err := setupNetwork(conn, d.Network); err != nil {
 		return err
 	}
 
@@ -115,9 +116,11 @@ func (d *Driver) createNetwork() error {
 
 	// network: default
 	// It is assumed that the libvirt/kvm installation has already created this network
+	if _, err := conn.LookupNetworkByName(d.Network); err != nil {
+		return errors.Wrapf(err, "network %s doesn't exist", d.Network)
+	}
 
 	// network: private
-
 	// Only create the private network if it does not already exist
 	if _, err := conn.LookupNetworkByName(d.PrivateNetwork); err != nil {
 		// create the XML for the private network from our networkTmpl
@@ -170,8 +173,12 @@ func (d *Driver) deleteNetwork() error {
 	log.Debugf("Checking if network %s exists...", d.PrivateNetwork)
 	network, err := conn.LookupNetworkByName(d.PrivateNetwork)
 	if err != nil {
-		// TODO: decide if we really wanna throw an error?
-		return errors.Wrap(err, "network %s does not exist")
+		if libvirtErr, ok := err.(libvirt.Error); ok && libvirtErr.Code == libvirt.ERR_NO_NETWORK {
+			log.Warnf("Network %s does not exist. Skipping deletion", d.PrivateNetwork)
+			return nil
+		}
+
+		return errors.Wrapf(err, "failed looking for network %s", d.PrivateNetwork)
 	}
 	log.Debugf("Network %s exists", d.PrivateNetwork)
 
@@ -320,7 +327,7 @@ func (d *Driver) lookupIPFromLeasesFile() (string, error) {
 		// ExpiryTime MAC IP Hostname ExtendedMAC
 		entry := strings.Split(lease, " ")
 		if len(entry) != 5 {
-			return "", fmt.Errorf("Malformed leases entry: %s", entry)
+			return "", fmt.Errorf("malformed leases entry: %s", entry)
 		}
 		if entry[1] == d.PrivateMAC {
 			ipAddress = entry[2]

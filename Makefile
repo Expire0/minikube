@@ -14,10 +14,10 @@
 
 # Bump these on release - and please check ISO_VERSION for correctness.
 VERSION_MAJOR ?= 1
-VERSION_MINOR ?= 0
-VERSION_BUILD ?= 1
+VERSION_MINOR ?= 1
+VERSION_BUILD ?= 0
 # Default to .0 for higher cache hit rates, as build increments typically don't require new ISO versions
-ISO_VERSION ?= v$(VERSION_MAJOR).$(VERSION_MINOR).1
+ISO_VERSION ?= v$(VERSION_MAJOR).$(VERSION_MINOR).0
 
 VERSION ?= v$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_BUILD)
 DEB_VERSION ?= $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_BUILD)
@@ -26,9 +26,9 @@ INSTALL_SIZE ?= $(shell du out/minikube-windows-amd64.exe | cut -f1)
 BUILDROOT_BRANCH ?= 2018.05
 REGISTRY?=gcr.io/k8s-minikube
 
-HYPERKIT_BUILD_IMAGE 	?= karalabe/xgo-1.10.x
-# NOTE: "latest" as of 2018-12-04. kube-cross images aren't updated as often as Kubernetes
-BUILD_IMAGE 	?= k8s.gcr.io/kube-cross:v1.11.1-1
+HYPERKIT_BUILD_IMAGE 	?= karalabe/xgo-1.12.x
+# NOTE: "latest" as of 2019-05-09. kube-cross images aren't updated as often as Kubernetes
+BUILD_IMAGE 	?= k8s.gcr.io/kube-cross:v1.12.5-1
 ISO_BUILD_IMAGE ?= $(REGISTRY)/buildroot-image
 KVM_BUILD_IMAGE ?= $(REGISTRY)/kvm-build-image
 
@@ -41,15 +41,13 @@ MINIKUBE_UPLOAD_LOCATION := gs://${MINIKUBE_BUCKET}
 KERNEL_VERSION ?= 4.16.14
 
 GO_VERSION ?= $(shell go version | cut -d' ' -f3 | sed -e 's/go//')
+export GO111MODULE := on
 
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 GOPATH ?= $(shell go env GOPATH)
 BUILD_DIR ?= ./out
 $(shell mkdir -p $(BUILD_DIR))
-
-ORG := k8s.io
-REPOPATH ?= $(ORG)/minikube
 
 # Use system python if it exists, otherwise use Docker.
 PYTHON := $(shell command -v python || echo "docker run --rm -it -v $(shell pwd):/minikube -w /minikube python python")
@@ -60,8 +58,6 @@ STORAGE_PROVISIONER_TAG := v1.8.1
 # Set the version information for the Kubernetes servers
 MINIKUBE_LDFLAGS := -X k8s.io/minikube/pkg/version.version=$(VERSION) -X k8s.io/minikube/pkg/version.isoVersion=$(ISO_VERSION) -X k8s.io/minikube/pkg/version.isoPath=$(ISO_BUCKET)
 PROVISIONER_LDFLAGS := "$(MINIKUBE_LDFLAGS) -s -w"
-
-MAKEDEPEND := GOPATH=$(GOPATH) ./makedepend.sh
 
 MINIKUBEFILES := ./cmd/minikube/
 HYPERKIT_FILES := ./cmd/drivers/hyperkit
@@ -77,12 +73,14 @@ MINIKUBE_MARKDOWN_FILES := README.md docs CONTRIBUTING.md CHANGELOG.md
 
 MINIKUBE_BUILD_TAGS := container_image_ostree_stub containers_image_openpgp
 MINIKUBE_INTEGRATION_BUILD_TAGS := integration $(MINIKUBE_BUILD_TAGS)
-SOURCE_DIRS = cmd pkg test
+
+CMD_SOURCE_DIRS = cmd pkg
+SOURCE_DIRS = $(SOURCE_DIRS) test
 SOURCE_PACKAGES = ./cmd/... ./pkg/... ./test/...
 
 # $(call DOCKER, image, command)
 define DOCKER
-	docker run --rm -e IN_DOCKER=1 --user $(shell id -u):$(shell id -g) -w /go/src/$(REPOPATH) -v $(GOPATH):/go --entrypoint /bin/bash $(1) -c '$(2)'
+	docker run --rm -e GOCACHE=/app/.cache -e IN_DOCKER=1 --user $(shell id -u):$(shell id -g) -w /app -v $(PWD):/app -v $(GOPATH):/go --entrypoint /bin/bash $(1) -c '$(2)'
 endef
 
 ifeq ($(BUILD_IN_DOCKER),y)
@@ -99,37 +97,24 @@ endif
 ifeq ($(GOOS),windows)
 	IS_EXE = ".exe"
 endif
+
+
 out/minikube$(IS_EXE): out/minikube-$(GOOS)-$(GOARCH)$(IS_EXE)
 	cp $< $@
 
 out/minikube-windows-amd64.exe: out/minikube-windows-amd64
 	cp out/minikube-windows-amd64 out/minikube-windows-amd64.exe
 
-out/minikube.d: pkg/minikube/assets/assets.go
-	$(MAKEDEPEND) out/minikube-$(GOOS)-$(GOARCH) $(ORG) $^ $(MINIKUBEFILES) > $@
-
--include out/minikube.d
-out/minikube-%: pkg/minikube/assets/assets.go
+out/minikube-%: pkg/minikube/assets/assets.go $(shell find $(CMD_SOURCE_DIRS) -type f -name "*.go")
 ifeq ($(MINIKUBE_BUILD_IN_DOCKER),y)
 	$(call DOCKER,$(BUILD_IMAGE),/usr/bin/make $@)
 else
-ifneq ($(GOPATH)/src/$(REPOPATH),$(CURDIR))
-	$(warning ******************************************************************************)
-	$(warning WARNING: You are building minikube outside the expected GOPATH:)
-	$(warning )
-	$(warning expected: $(GOPATH)/src/$(REPOPATH) )
-	$(warning   got:      $(CURDIR) )
-	$(warning )
-	$(warning You will likely encounter unusual build failures. For proper setup, read: )
-	$(warning https://github.com/kubernetes/minikube/blob/master/docs/contributors/build_guide.md)
-	$(warning ******************************************************************************)
-endif
 	GOOS="$(firstword $(subst -, ,$*))" GOARCH="$(lastword $(subst -, ,$*))" go build -tags "$(MINIKUBE_BUILD_TAGS)" -ldflags="$(MINIKUBE_LDFLAGS)" -a -o $@ k8s.io/minikube/cmd/minikube
 endif
 
-.PHONY: e2e-%-amd64
-e2e-%-amd64: out/minikube-%-amd64
-	GOOS=$* GOARCH=amd64 go test -c k8s.io/minikube/test/integration --tags="$(MINIKUBE_INTEGRATION_BUILD_TAGS)" -o out/$@
+.PHONY: e2e-%-$(GOARCH)
+e2e-%-$(GOARCH): out/minikube-%-$(GOARCH)
+	GOOS=$* GOARCH=$(GOARCH) go test -c k8s.io/minikube/test/integration --tags="$(MINIKUBE_INTEGRATION_BUILD_TAGS)" -o out/$@
 
 e2e-windows-amd64.exe: e2e-windows-amd64
 	mv $(BUILD_DIR)/e2e-windows-amd64 $(BUILD_DIR)/e2e-windows-amd64.exe
@@ -171,15 +156,12 @@ iso_in_docker:
 		--user $(shell id -u):$(shell id -g) --env HOME=/tmp --env IN_DOCKER=1 \
 		$(ISO_BUILD_IMAGE) /bin/bash
 
-test-iso:
-	go test -v $(REPOPATH)/test/integration --tags=iso --minikube-args="--iso-url=file://$(shell pwd)/out/buildroot/output/images/rootfs.iso9660"
+test-iso: pkg/minikube/assets/assets.go
+	go test -v ./test/integration --tags=iso --minikube-args="--iso-url=file://$(shell pwd)/out/buildroot/output/images/rootfs.iso9660"
 
 .PHONY: test-pkg
-test-pkg/%:
-	go test -v -test.timeout=60m $(REPOPATH)/$* --tags="$(MINIKUBE_BUILD_TAGS)"
-
-.PHONY: depend
-depend: out/minikube.d out/test.d out/docker-machine-driver-hyperkit.d out/storage-provisioner.d out/docker-machine-driver-kvm2.d
+test-pkg/%: pkg/minikube/assets/assets.go
+	go test -v -test.timeout=60m ./$* --tags="$(MINIKUBE_BUILD_TAGS)"
 
 .PHONY: all
 all: cross drivers e2e-cross
@@ -189,37 +171,34 @@ drivers: out/docker-machine-driver-hyperkit out/docker-machine-driver-kvm2
 
 .PHONY: integration
 integration: out/minikube
-	go test -v -test.timeout=60m $(REPOPATH)/test/integration --tags="$(MINIKUBE_INTEGRATION_BUILD_TAGS)" $(TEST_ARGS)
+	go test -v -test.timeout=60m ./test/integration --tags="$(MINIKUBE_INTEGRATION_BUILD_TAGS)" $(TEST_ARGS)
 
 .PHONY: integration-none-driver
-integration-none-driver: e2e-linux-amd64 out/minikube-linux-amd64
-	sudo -E out/e2e-linux-amd64 -testdata-dir "test/integration/testdata" -minikube-start-args="--vm-driver=none" -test.v -test.timeout=60m -binary=out/minikube-linux-amd64 $(TEST_ARGS)
+integration-none-driver: e2e-linux-$(GOARCH) out/minikube-linux-$(GOARCH)
+	sudo -E out/e2e-linux-$(GOARCH) -testdata-dir "test/integration/testdata" -minikube-start-args="--vm-driver=none" -test.v -test.timeout=60m -binary=out/minikube-linux-amd64 $(TEST_ARGS)
 
 .PHONY: integration-versioned
 integration-versioned: out/minikube
-	go test -v -test.timeout=60m $(REPOPATH)/test/integration --tags="$(MINIKUBE_INTEGRATION_BUILD_TAGS) versioned" $(TEST_ARGS)
+	go test -v -test.timeout=60m ./test/integration --tags="$(MINIKUBE_INTEGRATION_BUILD_TAGS) versioned" $(TEST_ARGS)
 
 .PHONY: test
-out/test.d: pkg/minikube/assets/assets.go
-	$(MAKEDEPEND) -t test $(ORG) $^ $(MINIKUBE_TEST_FILES) > $@
+test: pkg/minikube/assets/assets.go
+	./test.sh
 
--include out/test.d
-test:
-	GOPATH=$(GOPATH) ./test.sh
-
+# Regenerates assets.go when template files have been updated
 pkg/minikube/assets/assets.go: $(shell find deploy/addons -type f)
-	which go-bindata || GOBIN=$(GOPATH)/bin go get github.com/jteeuwen/go-bindata/...
+	which go-bindata || GO111MODULE=off GOBIN=$(GOPATH)/bin go get github.com/jteeuwen/go-bindata/...
 	PATH="$(PATH):$(GOPATH)/bin" go-bindata -nomemcopy -o pkg/minikube/assets/assets.go -pkg assets deploy/addons/...
 
 .PHONY: cross
-cross: out/minikube-linux-amd64 out/minikube-darwin-amd64 out/minikube-windows-amd64.exe
+cross: out/minikube-linux-$(GOARCH) out/minikube-darwin-amd64 out/minikube-windows-amd64.exe
 
 .PHONY: e2e-cross
 e2e-cross: e2e-linux-amd64 e2e-darwin-amd64 e2e-windows-amd64.exe
 
 .PHONY: checksum
 checksum:
-	for f in out/minikube-linux-amd64 out/minikube-darwin-amd64 out/minikube-windows-amd64.exe out/minikube.iso \
+	for f in out/minikube-linux-$(GOARCH) out/minikube-darwin-amd64 out/minikube-windows-amd64.exe out/minikube.iso \
 		 out/docker-machine-driver-kvm2 out/docker-machine-driver-hyperkit; do \
 		if [ -f "$${f}" ]; then \
 			openssl sha256 "$${f}" | awk '{print $$2}' > "$${f}.sha256" ; \
@@ -242,9 +221,28 @@ fmt:
 vet:
 	@go vet $(SOURCE_PACKAGES)
 
+# Once v1.16.1+ is released, replace with
+# curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh \
+#  | bash -s -- -b out/linters v1.16.1
+out/linters/golangci-lint:
+	mkdir -p out/linters
+	cd out/linters
+	test -f go.mod || go mod init linters
+	go get -u github.com/golangci/golangci-lint/cmd/golangci-lint@692dacb773b703162c091c2d8c59f9cd2d6801db 2>&1 \
+	  | grep -v "go: finding"
+	test -x $(GOPATH)/bin/golangci-lint \
+	  || curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh \
+	  | sh -s -- -b $(GOPATH)/bin v1.16.0
+	cp -f $(GOPATH)/bin/golangci-lint out/linters/golangci-lint
+
 .PHONY: lint
-lint:
-	@golint -set_exit_status $(SOURCE_PACKAGES)
+lint: pkg/minikube/assets/assets.go out/linters/golangci-lint
+	./out/linters/golangci-lint run \
+	  --deadline 4m \
+	  --build-tags "${MINIKUBE_INTEGRATION_BUILD_TAGS}" \
+	  --enable goimports,gocritic,golint,gocyclo,interfacer,misspell,nakedret,stylecheck,unconvert,unparam \
+	  --exclude 'variable on range scope.*in function literal|ifElseChain' \
+	  ./...
 
 .PHONY: reportcard
 reportcard:
@@ -257,7 +255,7 @@ mdlint:
 	@$(MARKDOWNLINT) $(MINIKUBE_MARKDOWN_FILES)
 
 out/docs/minikube.md: $(shell find cmd) $(shell find pkg/minikube/constants) pkg/minikube/assets/assets.go
-	cd $(GOPATH)/src/$(REPOPATH) && go run -ldflags="$(MINIKUBE_LDFLAGS)" hack/gen_help_text.go
+	go run -ldflags="$(MINIKUBE_LDFLAGS)" hack/help_text/gen_help_text.go
 
 out/minikube_$(DEB_VERSION).deb: out/minikube-linux-amd64
 	cp -r installers/linux/deb/minikube_deb_template out/minikube_$(DEB_VERSION)
@@ -301,10 +299,6 @@ out/minikube-installer.exe: out/minikube-windows-amd64.exe
 	mv out/windows_tmp/minikube-installer.exe out/minikube-installer.exe
 	rm -rf out/windows_tmp
 
-out/docker-machine-driver-hyperkit.d:
-	$(MAKEDEPEND) out/docker-machine-driver-hyperkit $(ORG) $^ $(HYPERKIT_FILES) > $@
-
--include out/docker-machine-driver-hyperkit.d
 out/docker-machine-driver-hyperkit:
 ifeq ($(MINIKUBE_BUILD_IN_DOCKER),y)
 	$(call DOCKER,$(HYPERKIT_BUILD_IMAGE),CC=o64-clang CXX=o64-clang++ /usr/bin/make $@)
@@ -328,20 +322,24 @@ $(ISO_BUILD_IMAGE): deploy/iso/minikube-iso/Dockerfile
 	@echo ""
 	@echo "$(@) successfully built"
 
-out/storage-provisioner.d:
-	$(MAKEDEPEND) out/storage-provisioner $(ORG) $^ $(STORAGE_PROVISIONER_FILES) > $@
-
--include out/storage-provisioner.d
 out/storage-provisioner:
 	GOOS=linux go build -o $(BUILD_DIR)/storage-provisioner -ldflags=$(PROVISIONER_LDFLAGS) cmd/storage-provisioner/main.go
 
 .PHONY: storage-provisioner-image
 storage-provisioner-image: out/storage-provisioner
-	docker build -t $(REGISTRY)/storage-provisioner:$(STORAGE_PROVISIONER_TAG) -f deploy/storage-provisioner/Dockerfile .
+ifeq ($(GOARCH),amd64)
+	docker build -t $(REGISTRY)/storage-provisioner:$(STORAGE_PROVISIONER_TAG) -f deploy/storage-provisioner/Dockerfile  .
+else
+	docker build -t $(REGISTRY)/storage-provisioner-$(GOARCH):$(STORAGE_PROVISIONER_TAG) -f deploy/storage-provisioner/Dockerfile-$(GOARCH) .
+endif
 
 .PHONY: push-storage-provisioner-image
 push-storage-provisioner-image: storage-provisioner-image
+ifeq ($(GOARCH),amd64)
 	gcloud docker -- push $(REGISTRY)/storage-provisioner:$(STORAGE_PROVISIONER_TAG)
+else
+	gcloud docker -- push $(REGISTRY)/storage-provisioner-$(GOARCH):$(STORAGE_PROVISIONER_TAG)
+endif
 
 .PHONY: out/gvisor-addon
 out/gvisor-addon:
@@ -365,10 +363,6 @@ release-minikube: out/minikube checksum
 	gsutil cp out/minikube-$(GOOS)-$(GOARCH) $(MINIKUBE_UPLOAD_LOCATION)/$(MINIKUBE_VERSION)/minikube-$(GOOS)-$(GOARCH)
 	gsutil cp out/minikube-$(GOOS)-$(GOARCH).sha256 $(MINIKUBE_UPLOAD_LOCATION)/$(MINIKUBE_VERSION)/minikube-$(GOOS)-$(GOARCH).sha256
 
-out/docker-machine-driver-kvm2.d:
-	$(MAKEDEPEND) out/docker-machine-driver-kvm2 $(ORG) $^ $(KVM_DRIVER_FILES) > $@
-
--include out/docker-machine-driver-kvm2.d
 out/docker-machine-driver-kvm2:
 	go build 																		\
 		-installsuffix "static" 													\
@@ -387,8 +381,7 @@ $(KVM_BUILD_IMAGE): installers/linux/kvm/Dockerfile
 kvm_in_docker:
 	docker inspect $(KVM_BUILD_IMAGE) || $(MAKE) $(KVM_BUILD_IMAGE)
 	rm -f out/docker-machine-driver-kvm2
-	docker run --rm -v $(PWD):/go/src/k8s.io/minikube $(KVM_BUILD_IMAGE) \
-		/usr/bin/make -C /go/src/k8s.io/minikube out/docker-machine-driver-kvm2
+	$(call DOCKER,$(KVM_BUILD_IMAGE),/usr/bin/make out/docker-machine-driver-kvm2)
 
 .PHONY: install-kvm
 install-kvm: out/docker-machine-driver-kvm2
